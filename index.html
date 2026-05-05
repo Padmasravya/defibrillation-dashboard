@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⚡ Adaptive Defibrillation Control — Live Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-dark:    #0A0E1A;
+    --bg-panel:   #111827;
+    --bg-card:    #1A2235;
+    --cyan:       #00E5FF;
+    --green:      #00FF8C;
+    --amber:      #FFB300;
+    --red:        #FF3D5A;
+    --purple:     #A855F7;
+    --text:       #E2E8F0;
+    --dim:        #64748B;
+    --grid:       #1E293B;
+    --border:     #243044;
+    --navy:       #0D1B2A;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg-dark);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── scanline overlay ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,229,255,.012) 2px,
+      rgba(0,229,255,.012) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ═══════════════════════ TITLE BAR ═══════════════════════ */
+  #titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: var(--navy);
+    border-bottom: 1px solid var(--cyan);
+    position: sticky; top: 0; z-index: 100;
+  }
+  #titlebar .logo {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    color: var(--cyan);
+    letter-spacing: 2px;
+    text-shadow: 0 0 12px rgba(0,229,255,.5);
+  }
+  #titlebar .logo span { color: var(--amber); }
+  #titlebar .right {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  #clock {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--dim);
+  }
+  #modeTag {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--amber);
+  }
+
+  /* ═══════════════════════ CONNECT SECTION ═══════════════════════ */
+  #connectBar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  #connectBar label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  #baudSelect {
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 5px 10px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .btn {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    padding: 7px 18px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: all .15s;
+    text-transform: uppercase;
+  }
+  .btn-connect  { background: var(--cyan);   color: #000; }
+  .btn-connect:hover  { background: #00b8d4; box-shadow: 0 0 14px rgba(0,229,255,.4); }
+  .btn-sim      { background: var(--amber);  color: #000; }
+  .btn-sim:hover      { background: #e6a000; box-shadow: 0 0 14px rgba(255,179,0,.4); }
+  .btn-disconnect { background: var(--red); color: #fff; }
+  .btn-disconnect:hover { background: #d63050; box-shadow: 0 0 14px rgba(255,61,90,.4); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  #statusPill {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--dim);
+    color: var(--dim);
+    transition: all .3s;
+  }
+  #statusPill.connected    { border-color: var(--green);  color: var(--green);  background: rgba(0,255,140,.08); }
+  #statusPill.simulating   { border-color: var(--amber);  color: var(--amber);  background: rgba(255,179,0,.08); }
+  #statusPill.disconnected { border-color: var(--red);    color: var(--red);    background: rgba(255,61,90,.08); }
+
+  /* ═══════════════════════ MAIN LAYOUT ═══════════════════════ */
+  #main {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 0;
+    height: calc(100vh - 97px);
+  }
+
+  /* ═══════════════════════ LEFT PANEL ═══════════════════════ */
+  #leftPanel {
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .card {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 14px 12px;
+  }
+  .card-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .card-value {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--cyan);
+    line-height: 1;
+    text-shadow: 0 0 20px rgba(0,229,255,.35);
+    transition: color .3s;
+  }
+
+  /* metric grid */
+  .metric-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .metric-grid .card {
+    border-right: 1px solid var(--border);
+  }
+  .metric-grid .card:nth-child(even) {
+    border-right: none;
+  }
+  .metric-grid .card-value {
+    font-size: 22px;
+  }
+
+  /* status panel */
+  #statusCard {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-card);
+  }
+  #sysStatusValue {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--cyan);
+    transition: color .3s;
+    text-shadow: 0 0 14px rgba(0,229,255,.4);
+  }
+  #statusBar {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--cyan);
+    margin-top: 6px;
+    transition: background .3s;
+  }
+
+  /* log */
+  #logPanel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+  }
+  #logHeader {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 2px;
+    padding: 8px 14px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  #logContainer {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    line-height: 1.6;
+  }
+  #logContainer::-webkit-scrollbar { width: 4px; }
+  #logContainer::-webkit-scrollbar-track { background: var(--bg-dark); }
+  #logContainer::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .log-line { padding: 1px 4px; border-radius: 2px; }
+  .log-IDLE          { color: var(--cyan); }
+  .log-ANALYZING     { color: var(--amber); }
+  .log-SHOCK_READY   { color: var(--green); }
+  .log-EMERGENCY_STOP { color: var(--red); }
+  .log-ts            { color: var(--dim); }
+
+  /* ═══════════════════════ RIGHT PANEL (CHARTS) ═══════════════════════ */
+  #rightPanel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-dark);
+  }
+
+  .chart-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 14px 6px;
+    min-height: 0;
+  }
+  .chart-section:last-child { border-bottom: none; }
+
+  .chart-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--cyan);
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+  }
+  .chart-wrap {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+  }
+  .chart-wrap canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  /* ═══════════════════════ WEB SERIAL NOTICE ═══════════════════════ */
+  #noSerialNotice {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: var(--red);
+    color: #fff;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    text-align: center;
+    padding: 8px;
+    z-index: 10000;
+  }
+
+  /* ═══════════════════════ GLOW PULSE ON SHOCK READY ═══════════════════════ */
+  @keyframes shockGlow {
+    0%,100% { box-shadow: 0 0 0 0 rgba(0,255,140,0); }
+    50%      { box-shadow: 0 0 30px 6px rgba(0,255,140,.25); }
+  }
+  body.shock-ready #leftPanel { animation: shockGlow 1.4s ease-in-out infinite; }
+
+  @keyframes emergencyPulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(255,61,90,0); }
+    50%      { box-shadow: 0 0 40px 10px rgba(255,61,90,.35); }
+  }
+  body.emergency #leftPanel { animation: emergencyPulse .6s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<div id="noSerialNotice">
+  ⚠ Web Serial API not supported. Please use <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> (desktop).
+</div>
+
+<!-- ── TITLE BAR ── -->
+<div id="titlebar">
+  <div class="logo">⚡ <span>ADAPTIVE DEFIBRILLATION</span> CONTROL SYSTEM</div>
+  <div class="right">
+    <span id="clock">--:--:--</span>
+    <span id="modeTag">● DISCONNECTED</span>
+  </div>
+</div>
+
+<!-- ── CONNECT BAR ── -->
+<div id="connectBar">
+  <label>Baud Rate:</label>
+  <select id="baudSelect">
+    <option value="115200" selected>115200</option>
+    <option value="9600">9600</option>
+    <option value="57600">57600</option>
+    <option value="38400">38400</option>
+  </select>
+  <button class="btn btn-connect" id="btnConnect" onclick="connectSerial()">🔌 Connect COM Port</button>
+  <button class="btn btn-sim" id="btnSim" onclick="toggleSim()">▶ Simulation Mode</button>
+  <button class="btn btn-disconnect" id="btnDisconnect" onclick="disconnect()" disabled>✕ Disconnect</button>
+  <span id="statusPill">● Not connected</span>
+</div>
+
+<!-- ── MAIN LAYOUT ── -->
+<div id="main">
+
+  <!-- LEFT PANEL -->
+  <div id="leftPanel">
+
+    <!-- Impedance big card -->
+    <div class="card">
+      <div class="card-label">Thoracic Impedance</div>
+      <div class="card-value" id="valImp">--- Ω</div>
+    </div>
+
+    <!-- 2-col metrics -->
+    <div class="metric-grid">
+      <div class="card">
+        <div class="card-label">Selected Energy</div>
+        <div class="card-value" id="valEnergy" style="color:var(--green);text-shadow:0 0 20px rgba(0,255,140,.35)">--- J</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Impedance Zone</div>
+        <div class="card-value" id="valZone" style="color:var(--amber);font-size:18px;padding-top:6px">---</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Shock Events</div>
+        <div class="card-value" id="valShocks" style="color:var(--purple);text-shadow:0 0 20px rgba(168,85,247,.35)">0</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Emergencies</div>
+        <div class="card-value" id="valEmerg" style="color:var(--red);text-shadow:0 0 20px rgba(255,61,90,.35)">0</div>
+      </div>
+    </div>
+
+    <!-- Uptime -->
+    <div class="card" style="padding:8px 14px;">
+      <div class="card-label">Session Uptime</div>
+      <div class="card-value" id="valUptime" style="color:var(--dim);font-size:18px">00:00:00</div>
+    </div>
+
+    <!-- System Status -->
+    <div id="statusCard">
+      <div class="card-label">System Status</div>
+      <div id="sysStatusValue">IDLE</div>
+      <div id="statusBar"></div>
+    </div>
+
+    <!-- Event Log -->
+    <div id="logPanel">
+      <div id="logHeader">EVENT LOG</div>
+      <div id="logContainer"></div>
+    </div>
+
+  </div><!-- /leftPanel -->
+
+  <!-- RIGHT PANEL — CHARTS -->
+  <div id="rightPanel">
+
+    <div class="chart-section">
+      <div class="chart-title">THORACIC IMPEDANCE (Ω)</div>
+      <div class="chart-wrap"><canvas id="chartImp"></canvas></div>
+    </div>
+
+    <div class="chart-section">
+      <div class="chart-title">SELECTED ENERGY (J)</div>
+      <div class="chart-wrap"><canvas id="chartEnergy"></canvas></div>
+    </div>
+
+    <div class="chart-section">
+      <div class="chart-title">SYSTEM STATE</div>
+      <div class="chart-wrap"><canvas id="chartState"></canvas></div>
+    </div>
+
+  </div><!-- /rightPanel -->
+
+</div><!-- /main -->
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════
+//  CONFIG
+// ══════════════════════════════════════════════════════════════════════════
+const MAX_POINTS   = 150;
+const IMP_LOW_MAX  = 90;
+const IMP_MED_MAX  = 120;
+const ENERGY_LOW   = 120;
+const ENERGY_MED   = 150;
+const ENERGY_HIGH  = 180;
+
+const C = {
+  cyan:   '#00E5FF', green: '#00FF8C',
+  amber:  '#FFB300', red:   '#FF3D5A',
+  purple: '#A855F7', dim:   '#64748B',
+  panel:  '#111827', grid:  '#1E293B'
+};
+
+const STATE_MAP = { IDLE: 0, ANALYZING: 1, SHOCK_READY: 2, EMERGENCY_STOP: 3 };
+const STATE_COLORS = { 0: C.cyan, 1: C.amber, 2: C.green, 3: C.red };
+
+// ── State ──────────────────────────────────────────────────────────────
+let times      = [], impedances = [], energies = [], states = [];
+let shockCount = 0, emergCount = 0;
+let startTime  = null;
+let serialPort = null, serialReader = null, readLoop = null;
+let simInterval = null, simRunning = false;
+let simPhase = 0;
+let lastStatus = 'IDLE';
+
+// ══════════════════════════════════════════════════════════════════════════
+//  CHART SETUP
+// ══════════════════════════════════════════════════════════════════════════
+Chart.defaults.color          = C.dim;
+Chart.defaults.borderColor    = C.grid;
+Chart.defaults.font.family    = "'Share Tech Mono', monospace";
+Chart.defaults.font.size      = 10;
+
+function makeChartBase(ctx, type, datasets, extraOpts) {
+  return new Chart(ctx, {
+    type,
+    data: { labels: [], datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          grid: { color: C.grid },
+          ticks: { maxTicksLimit: 8, callback: v => v.toFixed(0) + 's' }
+        },
+        y: {
+          grid: { color: C.grid },
+          ...extraOpts.y
+        }
+      },
+      elements: { point: { radius: 0 } },
+      ...extraOpts.extra
+    }
+  });
+}
+
+// ── Impedance chart ────────────────────────────────────────────────────
+const ctxImp = document.getElementById('chartImp').getContext('2d');
+const gradImp = ctxImp.createLinearGradient(0, 0, 0, 300);
+gradImp.addColorStop(0,   'rgba(0,229,255,.3)');
+gradImp.addColorStop(1,   'rgba(0,229,255,.01)');
+
+const chartImp = makeChartBase(ctxImp, 'line', [{
+  data: [],
+  borderColor: C.cyan,
+  backgroundColor: gradImp,
+  borderWidth: 2,
+  fill: true,
+  tension: 0.3,
+  pointRadius: 0
+}], {
+  y: {
+    min: 40, max: 160,
+    ticks: { stepSize: 20 }
+  },
+  extra: {}
+});
+
+// Add zone band plugin (background areas)
+const zoneBandPlugin = {
+  id: 'zoneBands',
+  beforeDatasetsDraw(chart) {
+    const { ctx, scales: { x, y } } = chart;
+    if (!x || !y) return;
+    const bands = [
+      { from: 50,  to: IMP_LOW_MAX,  color: 'rgba(0,255,140,.07)'  },
+      { from: IMP_LOW_MAX, to: IMP_MED_MAX, color: 'rgba(255,179,0,.07)' },
+      { from: IMP_MED_MAX, to: 150, color: 'rgba(255,61,90,.07)'  }
+    ];
+    bands.forEach(b => {
+      const yTop = y.getPixelForValue(b.to);
+      const yBot = y.getPixelForValue(b.from);
+      ctx.save();
+      ctx.fillStyle = b.color;
+      ctx.fillRect(x.left, yTop, x.right - x.left, yBot - yTop);
+      // dashed boundary line
+      ctx.strokeStyle = b.color.replace('.07', '.3');
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(x.left, yTop); ctx.lineTo(x.right, yTop);
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+};
+Chart.register(zoneBandPlugin);
+
+// ── Energy chart ───────────────────────────────────────────────────────
+const ctxEnergy = document.getElementById('chartEnergy').getContext('2d');
+const chartEnergy = makeChartBase(ctxEnergy, 'line', [{
+  data: [],
+  borderColor: C.green,
+  backgroundColor: 'rgba(0,255,140,.06)',
+  borderWidth: 2,
+  fill: true,
+  stepped: 'before',
+  pointRadius: 0
+}], {
+  y: {
+    min: 100, max: 200,
+    ticks: {
+      callback: v => [120,150,180].includes(v) ? v+'J' : '',
+      stepSize: 30
+    }
+  },
+  extra: {}
+});
+
+// ── State chart ────────────────────────────────────────────────────────
+const ctxState = document.getElementById('chartState').getContext('2d');
+const chartState = makeChartBase(ctxState, 'scatter', [{
+  data: [],
+  pointRadius: 4,
+  pointStyle: 'circle',
+  backgroundColor: [],
+  borderWidth: 0
+}], {
+  y: {
+    min: -0.5, max: 3.5,
+    ticks: {
+      stepSize: 1,
+      callback: v => ['IDLE','ANLYZ','SHOCK','EMRG'][Math.round(v)] || ''
+    }
+  },
+  extra: {}
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  DATA INGESTION
+// ══════════════════════════════════════════════════════════════════════════
+function ingest(imp, energy, status) {
+  if (startTime === null) startTime = Date.now();
+  const t = (Date.now() - startTime) / 1000;
+
+  times.push(t);
+  impedances.push(imp);
+  energies.push(energy ?? (energies.length ? energies[energies.length-1] : 0));
+  states.push(STATE_MAP[status] ?? 0);
+
+  if (times.length > MAX_POINTS) {
+    times.shift(); impedances.shift(); energies.shift(); states.shift();
+  }
+
+  // Counters
+  if (status === 'SHOCK_READY')    shockCount++;
+  if (status === 'EMERGENCY_STOP') emergCount++;
+  lastStatus = status;
+
+  updateMetrics(imp, energy, status);
+  updateCharts();
+  appendLog(imp, energy, status, t);
+  updateBodyClass(status);
+}
+
+function updateMetrics(imp, energy, status) {
+  document.getElementById('valImp').textContent    = imp.toFixed(1) + ' Ω';
+  document.getElementById('valEnergy').textContent = energy ? energy + ' J' : '--- J';
+  document.getElementById('valShocks').textContent = shockCount;
+  document.getElementById('valEmerg').textContent  = emergCount;
+
+  // Zone
+  let zone, zColor;
+  if (imp <= IMP_LOW_MAX)      { zone = 'LOW';    zColor = C.green; }
+  else if (imp <= IMP_MED_MAX) { zone = 'MEDIUM'; zColor = C.amber; }
+  else                         { zone = 'HIGH';   zColor = C.red;   }
+  const zEl = document.getElementById('valZone');
+  zEl.textContent = zone;
+  zEl.style.color = zColor;
+
+  // Imp color
+  const iEl = document.getElementById('valImp');
+  iEl.style.color = zColor;
+  iEl.style.textShadow = `0 0 20px ${zColor}55`;
+
+  // Status
+  const statusColors = {
+    IDLE: C.cyan, ANALYZING: C.amber,
+    SHOCK_READY: C.green, EMERGENCY_STOP: C.red
+  };
+  const sc = statusColors[status] || C.dim;
+  const sv = document.getElementById('sysStatusValue');
+  sv.textContent = status.replace('_', ' ');
+  sv.style.color = sc;
+  sv.style.textShadow = `0 0 14px ${sc}66`;
+  document.getElementById('statusBar').style.background = sc;
+
+  // Mode tag
+  document.getElementById('modeTag').textContent =
+    simRunning ? '● SIMULATION MODE' : '● LIVE — COM PORT';
+  document.getElementById('modeTag').style.color =
+    simRunning ? C.amber : C.green;
+
+  // Pill
+  const pill = document.getElementById('statusPill');
+  pill.textContent = simRunning ? '● Simulating' : '● Connected';
+  pill.className   = simRunning ? 'simulating' : 'connected';
+}
+
+function updateCharts() {
+  const xs = times.map(t => t);
+  const xMin = xs[0] || 0, xMax = Math.max(xs[xs.length-1] || 10, xMin+10);
+
+  // Impedance
+  chartImp.data.datasets[0].data = xs.map((x, i) => ({ x, y: impedances[i] }));
+  chartImp.options.scales.x.min = xMin;
+  chartImp.options.scales.x.max = xMax;
+  chartImp.update('none');
+
+  // Energy
+  chartEnergy.data.datasets[0].data = xs.map((x, i) => ({ x, y: energies[i] }));
+  chartEnergy.options.scales.x.min = xMin;
+  chartEnergy.options.scales.x.max = xMax;
+  chartEnergy.update('none');
+
+  // State scatter
+  const scatterData  = xs.map((x, i) => ({ x, y: states[i] }));
+  const scatterColors = states.map(s => STATE_COLORS[s] || C.dim);
+  chartState.data.datasets[0].data = scatterData;
+  chartState.data.datasets[0].backgroundColor = scatterColors;
+  chartState.options.scales.x.min = xMin;
+  chartState.options.scales.x.max = xMax;
+  chartState.update('none');
+}
+
+function updateBodyClass(status) {
+  document.body.classList.remove('shock-ready', 'emergency');
+  if (status === 'SHOCK_READY')    document.body.classList.add('shock-ready');
+  if (status === 'EMERGENCY_STOP') document.body.classList.add('emergency');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  LOG
+// ══════════════════════════════════════════════════════════════════════════
+function appendLog(imp, energy, status, t) {
+  const logEl  = document.getElementById('logContainer');
+  const ts = new Date().toTimeString().slice(0,8);
+  const cls = 'log-' + (status || 'IDLE').replace(' ','_');
+  const line = document.createElement('div');
+  line.className = 'log-line ' + cls;
+  line.innerHTML = `<span class="log-ts">[${ts}]</span> IMP=${imp.toFixed(1)}Ω  E=${energy||0}J  ${status}`;
+  logEl.appendChild(line);
+  // Keep max 300 lines
+  while (logEl.children.length > 300) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SERIAL PARSER
+// ══════════════════════════════════════════════════════════════════════════
+function parseLine(line) {
+  line = line.trim();
+  if (!line) return null;
+
+  let imp = null, energy = null, status = 'UNKNOWN';
+
+  // Format A: IMP:75.3,ENERGY:120,STATUS:SHOCK_READY
+  let m = line.match(/IMP:([\d.]+)/i);
+  if (m) imp = parseFloat(m[1]);
+  m = line.match(/ENERGY:(\d+)/i);
+  if (m) energy = parseInt(m[1]);
+  m = line.match(/STATUS:([A-Z_]+)/i);
+  if (m) status = m[1].toUpperCase();
+
+  // Format B: Impedance: 75.3 Ohm | Energy: 120 J | Status: SHOCK READY
+  if (imp === null) {
+    m = line.match(/[Ii]mpedance[:\s]+([\d.]+)/);
+    if (m) imp = parseFloat(m[1]);
+  }
+  if (energy === null) {
+    m = line.match(/[Ee]nergy[:\s]+(\d+)/);
+    if (m) energy = parseInt(m[1]);
+  }
+  if (status === 'UNKNOWN') {
+    for (const kw of ['EMERGENCY_STOP','EMERGENCY STOP','SHOCK_READY','SHOCK READY','ANALYZING','IDLE']) {
+      if (line.toUpperCase().includes(kw)) {
+        status = kw.replace(' ', '_');
+        break;
+      }
+    }
+  }
+
+  if (imp === null) return null;
+  return { imp, energy, status };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  WEB SERIAL
+// ══════════════════════════════════════════════════════════════════════════
+async function connectSerial() {
+  if (!('serial' in navigator)) {
+    document.getElementById('noSerialNotice').style.display = 'block';
+    return;
+  }
+  try {
+    const baud = parseInt(document.getElementById('baudSelect').value);
+    serialPort = await navigator.serial.requestPort();
+    await serialPort.open({ baudRate: baud });
+
+    document.getElementById('btnConnect').disabled = true;
+    document.getElementById('btnSim').disabled = true;
+    document.getElementById('btnDisconnect').disabled = false;
+    document.getElementById('statusPill').textContent = '● Connected';
+    document.getElementById('statusPill').className = 'connected';
+    document.getElementById('modeTag').textContent = '● LIVE — COM PORT';
+    document.getElementById('modeTag').style.color = C.green;
+
+    startTime = null;
+    readSerialLoop();
+  } catch(e) {
+    console.warn('Serial connect failed:', e);
+  }
+}
+
+async function readSerialLoop() {
+  const decoder = new TextDecoderStream();
+  const readableStreamClosed = serialPort.readable.pipeTo(decoder.writable);
+  serialReader = decoder.readable.getReader();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { value, done } = await serialReader.read();
+      if (done) break;
+      buffer += value;
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        const pkt = parseLine(line);
+        if (pkt) ingest(pkt.imp, pkt.energy, pkt.status);
+      }
+    }
+  } catch(e) {
+    console.warn('Serial read error:', e);
+  }
+}
+
+async function disconnect() {
+  stopSim();
+  if (serialReader) {
+    try { await serialReader.cancel(); } catch(e){}
+    serialReader = null;
+  }
+  if (serialPort) {
+    try { await serialPort.close(); } catch(e){}
+    serialPort = null;
+  }
+  document.getElementById('btnConnect').disabled = false;
+  document.getElementById('btnSim').disabled = false;
+  document.getElementById('btnDisconnect').disabled = true;
+  document.getElementById('statusPill').textContent = '● Disconnected';
+  document.getElementById('statusPill').className = 'disconnected';
+  document.getElementById('modeTag').textContent = '● DISCONNECTED';
+  document.getElementById('modeTag').style.color = C.red;
+  document.body.classList.remove('shock-ready','emergency');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SIMULATION MODE
+// ══════════════════════════════════════════════════════════════════════════
+function toggleSim() {
+  if (simRunning) {
+    stopSim();
+  } else {
+    startSim();
+  }
+}
+
+function startSim() {
+  if (simRunning) return;
+  simRunning = true;
+  startTime  = null;
+  simPhase   = 0;
+  document.getElementById('btnSim').textContent = '⏹ Stop Simulation';
+  document.getElementById('btnDisconnect').disabled = false;
+  document.getElementById('statusPill').textContent = '● Simulating';
+  document.getElementById('statusPill').className = 'simulating';
+
+  simInterval = setInterval(() => {
+    simPhase += 0.05;
+    const base  = 100 + 40 * Math.sin(simPhase);
+    const noise = (Math.random() - 0.5) * 6;
+    const imp   = Math.max(50, Math.min(150, base + noise));
+
+    let energy, status;
+    if (imp <= IMP_LOW_MAX)      { energy = ENERGY_LOW;  status = 'IDLE'; }
+    else if (imp <= IMP_MED_MAX) { energy = ENERGY_MED;  status = 'ANALYZING'; }
+    else                         { energy = ENERGY_HIGH; status = 'SHOCK_READY'; }
+
+    if (Math.random() < 0.018) status = 'EMERGENCY_STOP';
+
+    ingest(parseFloat(imp.toFixed(2)), energy, status);
+  }, 250);
+}
+
+function stopSim() {
+  if (!simRunning) return;
+  simRunning = false;
+  clearInterval(simInterval);
+  simInterval = null;
+  document.getElementById('btnSim').textContent = '▶ Simulation Mode';
+  document.getElementById('btnDisconnect').disabled = true;
+  document.getElementById('statusPill').textContent = '● Not connected';
+  document.getElementById('statusPill').className = '';
+  document.getElementById('modeTag').textContent = '● DISCONNECTED';
+  document.getElementById('modeTag').style.color = C.red;
+  document.body.classList.remove('shock-ready','emergency');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  CLOCK + UPTIME
+// ══════════════════════════════════════════════════════════════════════════
+function tickClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toTimeString().slice(0,8);
+
+  if (startTime !== null) {
+    const el = Math.floor((Date.now() - startTime) / 1000);
+    const h  = Math.floor(el / 3600);
+    const m  = Math.floor((el % 3600) / 60);
+    const s  = el % 60;
+    document.getElementById('valUptime').textContent =
+      String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  }
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  WEB SERIAL SUPPORT CHECK
+// ══════════════════════════════════════════════════════════════════════════
+if (!('serial' in navigator)) {
+  document.getElementById('noSerialNotice').style.display = 'block';
+  document.getElementById('btnConnect').disabled = true;
+  document.getElementById('btnConnect').title = 'Web Serial not supported in this browser';
+}
+</script>
+</body>
+</html>
