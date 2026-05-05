@@ -340,15 +340,13 @@
 
 <!-- ── CONNECT BAR ── -->
 <div id="connectBar">
-  <label>Baud Rate:</label>
-  <select id="baudSelect">
-    <option value="115200" selected>115200</option>
-    <option value="9600">9600</option>
-    <option value="57600">57600</option>
-    <option value="38400">38400</option>
-  </select>
-  <button class="btn btn-connect" id="btnConnect" onclick="connectSerial()">🔌 Connect COM Port</button>
-  <button class="btn btn-sim" id="btnSim" onclick="toggleSim()">▶ Simulation Mode</button>
+  <label>ESP32 IP:</label>
+  <input id="espIP" type="text" value="192.168.1.47" placeholder="e.g. 192.168.1.47"
+    style="background:var(--bg-card);color:var(--text);border:1px solid var(--border);
+           padding:5px 10px;font-family:'Share Tech Mono',monospace;font-size:12px;
+           border-radius:4px;width:160px;">
+  <button class="btn btn-connect" id="btnConnect" onclick="connectWS()">🔌 Connect ESP32</button>
+  <button class="btn btn-sim"     id="btnSim"     onclick="toggleSim()">▶ Simulation Mode</button>
   <button class="btn btn-disconnect" id="btnDisconnect" onclick="disconnect()" disabled>✕ Disconnect</button>
   <span id="statusPill">● Not connected</span>
 </div>
@@ -748,52 +746,51 @@ function parseLine(line) {
 // ══════════════════════════════════════════════════════════════════════════
 //  WEB SERIAL
 // ══════════════════════════════════════════════════════════════════════════
-async function connectSerial() {
-  if (!('serial' in navigator)) {
-    document.getElementById('noSerialNotice').style.display = 'block';
-    return;
-  }
-  try {
-    const baud = parseInt(document.getElementById('baudSelect').value);
-    serialPort = await navigator.serial.requestPort();
-    await serialPort.open({ baudRate: baud });
+let ws = null;
 
-    document.getElementById('btnConnect').disabled = true;
-    document.getElementById('btnSim').disabled = true;
+function connectWS() {
+  const ip = document.getElementById('espIP').value.trim();
+  if (!ip) return;
+
+  ws = new WebSocket(`ws://${ip}:81`);
+
+  ws.onopen = () => {
+    document.getElementById('btnConnect').disabled    = true;
+    document.getElementById('btnSim').disabled        = true;
     document.getElementById('btnDisconnect').disabled = false;
     document.getElementById('statusPill').textContent = '● Connected';
-    document.getElementById('statusPill').className = 'connected';
-    document.getElementById('modeTag').textContent = '● LIVE — COM PORT';
-    document.getElementById('modeTag').style.color = C.green;
-
+    document.getElementById('statusPill').className   = 'connected';
+    document.getElementById('modeTag').textContent    = '● LIVE — WiFi';
+    document.getElementById('modeTag').style.color    = C.green;
     startTime = null;
-    readSerialLoop();
-  } catch(e) {
-    console.warn('Serial connect failed:', e);
-  }
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const pkt = JSON.parse(event.data);
+      if (pkt.impedance != null) {
+        ingest(parseFloat(pkt.impedance), parseInt(pkt.energy), pkt.status);
+      }
+    } catch(e) { console.warn('Parse error:', e); }
+  };
+
+  ws.onerror = () => {
+    document.getElementById('statusPill').textContent = '● Connection failed';
+    document.getElementById('statusPill').className   = 'disconnected';
+  };
+
+  ws.onclose = () => {
+    document.getElementById('btnConnect').disabled    = false;
+    document.getElementById('btnSim').disabled        = false;
+    document.getElementById('btnDisconnect').disabled = true;
+    document.getElementById('statusPill').textContent = '● Disconnected';
+    document.getElementById('statusPill').className   = 'disconnected';
+  };
 }
 
-async function readSerialLoop() {
-  const decoder = new TextDecoderStream();
-  const readableStreamClosed = serialPort.readable.pipeTo(decoder.writable);
-  serialReader = decoder.readable.getReader();
-  let buffer = '';
-
-  try {
-    while (true) {
-      const { value, done } = await serialReader.read();
-      if (done) break;
-      buffer += value;
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) {
-        const pkt = parseLine(line);
-        if (pkt) ingest(pkt.imp, pkt.energy, pkt.status);
-      }
-    }
-  } catch(e) {
-    console.warn('Serial read error:', e);
-  }
+function disconnect() {
+  stopSim();
+  if (ws) { ws.close(); ws = null; }
 }
 
 async function disconnect() {
@@ -887,14 +884,6 @@ function tickClock() {
 setInterval(tickClock, 1000);
 tickClock();
 
-// ══════════════════════════════════════════════════════════════════════════
-//  WEB SERIAL SUPPORT CHECK
-// ══════════════════════════════════════════════════════════════════════════
-if (!('serial' in navigator)) {
-  document.getElementById('noSerialNotice').style.display = 'block';
-  document.getElementById('btnConnect').disabled = true;
-  document.getElementById('btnConnect').title = 'Web Serial not supported in this browser';
-}
 </script>
 </body>
 </html>
